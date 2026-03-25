@@ -1,8 +1,9 @@
 import math
 import re
+import os
 from bsbi import BSBIIndex
 from compression import VBEPostings
-
+from compression import OptPForDeltaPostings
 ######## >>>>> sebuah IR metric: RBP p = 0.8
 
 def rbp(ranking, p = 0.8):
@@ -23,10 +24,10 @@ def rbp(ranking, p = 0.8):
       Float
         score RBP
   """
-  score = 0.
-  for i in range(1, len(ranking)):
-    pos = i - 1
-    score += ranking[pos] * (p ** (i - 1))
+  score = 0.0
+  for i in range(1, len(ranking) + 1):
+      pos = i - 1
+      score += ranking[pos] * (p ** (i - 1))
   return (1 - p) * score
 
 
@@ -98,44 +99,60 @@ def ap(ranking, n_relevant):
   return score / n_relevant
 
 ######## >>>>> EVALUASI !
-def eval(qrels, query_file = "queries.txt", k = 1000):
-  """
-  loop ke semua 30 query, hitung score di setiap query,
-  lalu hitung mean score untuk semua query.
-  """
-  BSBI_instance = BSBIIndex(data_dir = 'collection',
-                            postings_encoding = VBEPostings,
-                            output_dir = 'index')
+def eval_instance(bsbi_instance, qrels, retrieval_method, query_file="queries.txt", k=1000, label=""):
+    retriever = getattr(bsbi_instance, retrieval_method)
 
-  with open(query_file) as file:
-    rbp_scores = []
-    dcg_scores = []
-    ndcg_scores = []
-    ap_scores = []
+    with open(query_file) as file:
+        rbp_scores = []
+        dcg_scores = []
+        ndcg_scores = []
+        ap_scores = []
 
-    for qline in file:
-      parts = qline.strip().split()
-      qid = parts[0]
-      query = " ".join(parts[1:])
+        for qline in file:
+            parts = qline.strip().split()
+            qid = parts[0]
+            query = " ".join(parts[1:])
 
-      ranking = []
-      for (score, doc) in BSBI_instance.retrieve_tfidf(query, k = k):
-        did = int(re.search(r'\/.*\/.*\/(.*)\.txt', doc).group(1))
-        ranking.append(qrels[qid][did])
+            ranking = []
+            for score, doc in retriever(query, k=k):
+                did = int(os.path.splitext(os.path.basename(doc))[0])
+                ranking.append(qrels[qid][did])
 
-      # kalau hasil retrieval kurang dari k, anggap sisanya tidak relevan
-      if len(ranking) < k:
-        ranking += [0] * (k - len(ranking))
+            if len(ranking) < k:
+                ranking += [0] * (k - len(ranking))
 
-      n_relevant = sum(qrels[qid].values())
+            n_relevant = sum(qrels[qid].values())
 
-      rbp_scores.append(rbp(ranking))
-      dcg_scores.append(dcg(ranking))
-      ndcg_scores.append(ndcg(ranking, n_relevant))
-      ap_scores.append(ap(ranking, n_relevant))
+            rbp_scores.append(rbp(ranking))
+            dcg_scores.append(dcg(ranking))
+            ndcg_scores.append(ndcg(ranking, n_relevant))
+            ap_scores.append(ap(ranking, n_relevant))
 
-  print("Hasil evaluasi TF-IDF terhadap 30 queries")
-  print("RBP score  =", sum(rbp_scores) / len(rbp_scores))
-  print("DCG score  =", sum(dcg_scores) / len(dcg_scores))
-  print("NDCG score =", sum(ndcg_scores) / len(ndcg_scores))
-  print("AP score   =", sum(ap_scores) / len(ap_scores))
+    print(f"Hasil evaluasi {label}")
+    print("RBP score  =", sum(rbp_scores) / len(rbp_scores))
+    print("DCG score  =", sum(dcg_scores) / len(dcg_scores))
+    print("NDCG score =", sum(ndcg_scores) / len(ndcg_scores))
+    print("AP score   =", sum(ap_scores) / len(ap_scores))
+    print()
+
+def eval(qrels, query_file="queries.txt", k=1000):
+    bsbi_vbe = BSBIIndex(
+        data_dir='collection',
+        postings_encoding=VBEPostings,
+        output_dir='index'
+    )
+
+    bsbi_opt = BSBIIndex(
+        data_dir='collection',
+        postings_encoding=OptPForDeltaPostings,
+        output_dir='index2'
+    )
+
+    eval_instance(bsbi_vbe, qrels, "retrieve_tfidf", query_file, k, "TF-IDF dengan VBE (index)")
+    eval_instance(bsbi_opt, qrels, "retrieve_tfidf", query_file, k, "TF-IDF dengan OptPForDelta (index2)")
+    eval_instance(bsbi_vbe, qrels, "retrieve_bm25", query_file, k, "BM25 dengan VBE (index)")
+    eval_instance(bsbi_opt, qrels, "retrieve_bm25", query_file, k, "BM25 dengan OptPForDelta (index2)")
+
+if __name__ == "__main__":
+    qrels = load_qrels()
+    eval(qrels)

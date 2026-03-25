@@ -7,7 +7,7 @@ import bisect
 
 from index import InvertedIndexReader, InvertedIndexWriter
 from util import IdMap, sorted_merge_posts_and_tfs
-from compression import StandardPostings, VBEPostings
+from compression import OptPForDeltaPostings, StandardPostings, VBEPostings
 from tqdm import tqdm
 
 
@@ -509,12 +509,20 @@ class BSBIIndex:
                 ]
                 self.merge(indices, merged_index)
 
-
 if __name__ == "__main__":
-    bsbi_instance = BSBIIndex(
-        data_dir="collection",
-        postings_encoding=VBEPostings,
-        output_dir="index",
-    )
-    bsbi_instance.index()
-    
+    def build_index(output_dir, postings_encoding, index_name="main_index"):
+        os.makedirs(output_dir, exist_ok=True)
+        bsbi = BSBIIndex(
+            data_dir="collection",
+            output_dir=output_dir,
+            postings_encoding=postings_encoding,
+            index_name=index_name,
+        )
+        bsbi.index()
+
+    if __name__ == "__main__":
+        # index biasa
+        build_index("index", VBEPostings, "main_index")
+
+        # index kedua untuk compression baru
+        build_index("index2", OptPForDeltaPostings, "main_index")
